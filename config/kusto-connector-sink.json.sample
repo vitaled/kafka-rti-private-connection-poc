@@ -1,0 +1,19 @@
+{
+  "name": "kusto-sink-test",
+  "config": {
+    "connector.class": "com.microsoft.azure.kusto.kafka.connect.sink.KustoSinkConnector",
+    "tasks.max": "1",
+    "topics": "test-topic",
+    "kusto.ingestion.url": "https://ingest-<ID>.kusto.fabric.microsoft.com", // Replace <ID> with your Kusto cluster ID
+    "kusto.query.url": "https://<id>.kusto.fabric.microsoft.com", // Replace <ID> with your Kusto cluster ID
+    "aad.auth.authority": "<TENANT_ID>", // Replace with your Azure AD tenant ID
+    "aad.auth.appid": "<Client ID>",// Replace with your Application ID
+    "aad.auth.appkey": "<Client Secret>", //replace with your app key
+    "kusto.database": "<Kusto Database Name>", // Replace with your Kusto database name
+    "kusto.table": "<Kusto Table Name>", // Specify the Kusto table to write to
+    // The mapping configuration for the Kusto table
+    "kusto.tables.topics.mapping":"[{'topic': 'test-topic','db': 'kafka','table': 'test','format': 'csv','mapping':'test_mapping','streaming': true}]",
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}
