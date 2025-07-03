@@ -84,6 +84,7 @@ This POC implements a bridge solution using Kafka Connect with a custom sink con
 First, deploy the Azure virtual network and VM using Bicep:
 
 **Windows (PowerShell):**
+
 ```powershell
 # Clone the repository
 git clone https://github.com/vitaled/kafka-rti-private-connection-poc.git
@@ -110,6 +111,7 @@ The script will:
 Create an Azure service principal for Fabric authentication:
 
 **Windows (PowerShell):**
+
 ```powershell
 # Run the script
 .\scripts\create-service-principal.ps1
@@ -117,137 +119,248 @@ Create an Azure service principal for Fabric authentication:
 
 Save the output credentials securely - you'll need them for the connector configuration.
 
-### 3. Access the VM
+### 3. Configure Microsoft Fabric Workspace
 
-The VM is automatically configured with Docker and required tools via cloud-init:
+Before connecting Kafka to your RTI environment, you need to set up the Fabric workspace and KQL database components:
 
-```bash
-# SSH into the VM using the generated key
-ssh -i kafka-vm-key.pem azureuser@<VM_PUBLIC_IP>
+#### 3.1 Create KQL Database
 
-# Check setup status
-sudo cloud-init status
+1. Navigate to your **Microsoft Fabric workspace** in the Fabric portal
+2. Click **+ New** and select **KQL Database**
+3. Provide a name for your database (e.g., `kafka-rti-database`)
+4. Click **Create**
 
-# View setup logs if needed
-sudo cat /var/log/cloud-init-output.log
+#### 3.2 Create Target Table
+
+Once your KQL database is created, create a table to receive the Kafka data:
+
+1. Open your KQL database
+2. Click **+ New** and select **KQL Queryset**
+3. Execute the following KQL command to create your target table:
+
+```kql
+.create table TestTable (
+    id: int,
+    value: string
+)
 ```
 
-### 4. Start Kafka and Kafka Connect
+#### 3.3 Create Data Mapping
 
-```bash
-# Navigate to project directory
-cd kafka-rti-private-connection-poc
+Create a mapping to define how incoming CSV data should be parsed:
 
-# Start the services
-docker-compose -f docker/docker-compose.yml up -d
-
-# Verify services are running
-docker-compose -f docker/docker-compose.yml ps
-
-# Check Kafka Connect is ready
-curl http://localhost:8083/connectors
+```kql
+.create table TestTable ingestion csv mapping 'test_mapping' 
+'[{"Name":"id","DataType":"int","Ordinal":0},{"Name":"value","DataType":"string","Ordinal":1}]'
 ```
 
-### 5 Configure Kafka Connect Sink Connector
+#### 3.4 Configure Service Principal Permissions
 
-Create a configuration file for the Kafka Connect sink connector:
+You need to grant your service principal the necessary permissions to access the workspace and database:
+
+**Add Service Principal as Workspace Contributor:**
+
+1. In your Fabric workspace, click **Workspace settings** (gear icon)
+2. Select **Manage access**
+3. Click **+ Add people or groups**
+4. Search for your service principal by **Application ID** or **Display Name**
+5. Select the service principal and assign the **Contributor** role
+6. Click **Add**
+
+**Add Service Principal as Database Admin:**
+
+1. In your KQL database, click **Manage** → **Permissions**
+2. Click **+ Add**
+3. Select **Database Admin**
+4. Search for your service principal by **Application ID** or **Display Name**
+5. Select the service principal and click **Add**
+
+#### 3.5 Get Database Connection Information
+
+You'll need the following information for your Kafka connector configuration:
+
+1. **Cluster URI**: In your KQL database, go to **Overview** and copy the **Query URI**
+   - Format: `https://<cluster-id>.kusto.fabric.microsoft.com`
+2. **Ingestion URI**: Replace the query URI domain with the ingestion endpoint
+   - Format: `https://ingest-<cluster-id>.kusto.fabric.microsoft.com`
+3. **Database Name**: Your KQL database name
+4. **Table Name**: `TestTable` (or your custom table name)
+
+**Example Configuration Values:**
+```json
+{
+  "kusto.ingestion.url": "https://ingest-mycluster.kusto.fabric.microsoft.com",
+  "kusto.query.url": "https://mycluster.kusto.fabric.microsoft.com",
+  "kusto.database": "kafka-rti-database",
+  "kusto.table": "TestTable"
+}
+```
+
+#### 3.6 Test Database Access
+
+Verify that your service principal has the correct permissions by testing a simple query:
+
+```kql
+// Test query to verify access
+TestTable
+| count
+```
+
+If you encounter permission errors, double-check that:
+- The service principal has **Contributor** role on the workspace
+- The service principal has **Database Admin** permissions on the KQL database
+- The service principal credentials are correctly configured
+
+### 4. Access the VM
+
+After the infrastructure deployment is complete, you can access the Kafka Connect VM using SSH:
+
+```powershell
+# Connect to the VM (replace with your public IP)
+ssh -i kafka-vm-key.pem azureuser@<public-ip>
+
+# Example
+ssh -i kafka-vm-key.pem azureuser@20.123.456.789
+```
+
+**Note**: The default username is `azureuser`. The SSH private key file (`kafka-vm-key.pem`) must have proper permissions (chmod 600).
+
+### 5. Configure and Start Kafka Connect
+
+Once connected to the VM, configure and start the Kafka Connect service:
+
+#### 5.1 Edit Kafka Connect Configuration
+
+Open the Kafka Connect configuration file in a text editor:
+
+```bash
+sudo nano /etc/kafka/connect-distributed.properties
+```
+
+Update the following properties:
+
+```properties
+# Kafka broker address
+bootstrap.servers=<kafka-broker-ip>:9092
+
+# Unique group ID for Kafka Connect
+group.id=connect-cluster
+
+# Offset storage settings
+offset.storage.file.filename=/var/lib/kafka/connect.offsets
+
+# Key and value converter settings
+key.converter=org.apache.kafka.connect.json.JsonConverter
+value.converter=org.apache.kafka.connect.json.JsonConverter
+value.converter.schemas.enable=false
+```
+
+**Note**: Replace `<kafka-broker-ip>` with the actual IP address of your Kafka broker.
+
+#### 5.2 Create Connectors Configuration
+
+Create a new file for your connector configuration:
+
+```bash
+sudo nano /etc/kafka/connectors/my-kafka-sink-connector.json
+```
+
+Add the following configuration:
 
 ```json
 {
-  "name": "kusto-sink-connector",
+  "name": "my-kafka-sink-connector",
   "config": {
     "connector.class": "com.microsoft.azure.kusto.kafka.connect.sink.KustoSinkConnector",
     "tasks.max": "1",
     "topics": "test-topic",
-    "kusto.ingestion.url": "https://ingest-<ID>.kusto.fabric.microsoft.com", // Replace <ID> with your Kusto cluster ID
-    "kusto.query.url": "https://<id>.kusto.fabric.microsoft.com", // Replace <ID> with your Kusto cluster ID
-    "aad.auth.authority": "<TENANT_ID>", // Replace with your Azure AD tenant ID
-    "aad.auth.appid": "<Client ID>", // Replace with your Application ID
-    "aad.auth.appkey": "<Client Secret>", // Replace with your app key
-    "kusto.database": "<Kusto Database Name>", // Replace with your Kusto database name
-    "kusto.table": "<Kusto Table Name>", // Specify the Kusto table to write to
-    "kusto.tables.topics.mapping": "[{'topic': 'test-topic','db': 'kafka','table': 'test','format': 'csv','mapping':'test_mapping','streaming': true}]",
-    "value.converter": "org.apache.kafka.connect.storage.StringConverter",
-    "value.converter.schemas.enable": "false"
+    "kusto.cluster": "<cluster-id>.kusto.fabric.microsoft.com",
+    "kusto.database": "kafka-rti-database",
+    "kusto.table": "TestTable",
+    "kusto.ingestion.url": "https://ingest-<cluster-id>.kusto.fabric.microsoft.com",
+    "kusto.query.url": "https://<cluster-id>.kusto.fabric.microsoft.com",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "flush.size": "100",
+    "linger.ms": "500",
+    "retry.backoff.ms": "300",
+    "max.in.flight.requests.per.connection": "1",
+    "authentication.type": "ServicePrincipal",
+    "service.principal": "<app-id>",
+    "service.principal.secret": "<app-secret>",
+    "tenant.id": "<tenant-id>"
   }
 }
 ```
 
-Save this as `config/kusto-connector-sink.json`.
+**Note**: Replace the placeholder values with your actual configuration values.
 
-### Install the Kusto Sink Connector
+#### 5.3 Start Kafka Connect Service
 
-To install the Kusto Sink Connector: you can either [download](https://github.com/Azure/kafka-sink-azure-kusto?tab=readme-ov-file#91-download-a-ready-to-use-uber-jar-from-our-github-repo-releases-listing) the JAR file from the [kafka-sink-azure-kusto repository](https://github.com/Azure/kafka-sink-azure-kusto)) or [build](https://github.com/Azure/kafka-sink-azure-kusto?tab=readme-ov-file#93-build-uber-jar-from-source) it from source.
-
-Place the JAR file in the `connectors/` directory and restart docker-compose:
+Start or restart the Kafka Connect service to apply the changes:
 
 ```bash
-docker-compose -f docker/docker-compose.yml down
-docker-compose -f docker/docker-compose.yml up -d
+sudo systemctl restart kafka-connect
 ```
 
-### 6. Register the Connector
+#### 5.4 Verify Connector Status
 
-Then execute the following command to register the connector:
+Check the status of your connector to ensure it's running correctly:
 
 ```bash
-curl -X POST http://127.0.0.1:8083/connectors -H 'Content-Type: application/json' -d @config/kusto-connector-sink.json
+curl -X GET http://localhost:8083/connectors/my-kafka-sink-connector/status
 ```
 
-### 7. Send Test Data
+You should see a response indicating the connector is running and the task is active.
 
-To test the connector, produce some sample data to the Kafka topic:
+## Testing the Setup
+
+To test the end-to-end setup, produce some test messages to the Kafka topic and verify they appear in the KQL table:
+
+### 1. Produce Test Messages to Kafka
+
+Use the Kafka console producer to send test messages:
 
 ```bash
+# Open a new terminal and SSH into the Kafka Connect VM
+
 # Produce test messages to the Kafka topic
-docker exec -it kafka-kafka-1 kafka-console-producer --broker-list localhost:9092 --topic test-topic --property "parse.key=true" --property "key.separator=:" <<EOF
-1,value1
-2,value2
-3,value3
+kafka-console-producer --broker-list <kafka-broker-ip>:9092 --topic test-topic --property "parse.key=true" --property "key.separator=:" <<EOF
+1:TestValue1
+2:TestValue2
+3:TestValue3
+EOF
 ```
 
-### 8. Verify Data Flow
+### 2. Query the KQL Table
 
-Check that data is flowing from Kafka to your KQL database:
+After producing the test messages, query the KQL table to verify the data was ingested:
 
 ```kql
-// Query your KQL table in Fabric RTI
-YourTargetTable
-| take 10
-| order by ingestion_time() desc
+// Query the KQL table
+TestTable
+| order by id asc
 ```
 
-## Performance Tuning
+You should see the test messages appear in the query results.
 
-### Connector Optimization
+## Troubleshooting Tips
 
-- Adjust `batch.size` based on throughput requirements
-- Configure appropriate `tasks.max` for parallelism
-- Tune `flush.timeout.ms` for latency vs. throughput balance
+- Check the Kafka Connect logs for any error messages or stack traces
+- Verify that all network security group (NSG) rules and firewall settings allow the necessary traffic
+- Ensure that the service principal credentials are correct and have not expired
+- Double-check the configuration values for any typos or incorrect settings
+- Use the Kafka and Kusto documentation for additional troubleshooting guidance
 
-### Kafka Connect Cluster
+## Conclusion
 
-- Allocate sufficient memory and CPU resources
-- Monitor JVM heap usage and garbage collection
-- Scale horizontally by adding more worker nodes
+This proof of concept demonstrates a viable solution for connecting Apache Kafka instances in private networks to Microsoft Fabric's Real Time Intelligence platform using Kafka Connect and a custom sink connector. By following the steps outlined in this document, you can securely stream data from your private Kafka clusters to KQL databases in RTI, enabling real-time analytics and insights.
 
-## Contributing
+## References
 
-Contributions are welcome!
-
-## Support
-
-For questions and support:
-
-- 📧 Email: [dvitale@microsoft.com]
-- 💬 Issues: [GitHub Issues](https://github.com/vitaled/kafka-rti-private-connection-poc/issues)
-
-### Acknowledgments
-
-- Microsoft Fabric team for Real Time Intelligence platform
-- Apache Kafka community
-- Confluent for Kafka Connect framework
-
----
-
-**Note**: This is a proof of concept and should be thoroughly tested before production use. Microsoft Fabric's Real Time Intelligence is continuously evolving, and native private connectivity features may be added in future releases.
+- [Microsoft Fabric Documentation](https://docs.microsoft.com/en-us/fabric/)
+- [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
+- [Kafka Connect Documentation](https://docs.confluent.io/platform/current/connect/index.html)
+- [Kusto Query Language (KQL) Documentation](https://docs.microsoft.com/en-us/azure/data-explorer/kusto/query/)
+- [Azure AD Service Principals](https://docs.microsoft.com/en-us/azure/active-directory/develop/howto-create-service-principal-portal)
