@@ -186,16 +186,6 @@ You'll need the following information for your Kafka connector configuration:
 3. **Database Name**: Your KQL database name
 4. **Table Name**: `TestTable` (or your custom table name)
 
-**Example Configuration Values:**
-```json
-{
-  "kusto.ingestion.url": "https://ingest-mycluster.kusto.fabric.microsoft.com",
-  "kusto.query.url": "https://mycluster.kusto.fabric.microsoft.com",
-  "kusto.database": "kafka-rti-database",
-  "kusto.table": "TestTable"
-}
-```
-
 #### 3.6 Test Database Access
 
 Verify that your service principal has the correct permissions by testing a simple query:
@@ -229,35 +219,7 @@ ssh -i kafka-vm-key.pem azureuser@20.123.456.789
 
 Once connected to the VM, configure and start the Kafka Connect service:
 
-#### 5.1 Edit Kafka Connect Configuration
-
-Open the Kafka Connect configuration file in a text editor:
-
-```bash
-sudo nano /etc/kafka/connect-distributed.properties
-```
-
-Update the following properties:
-
-```properties
-# Kafka broker address
-bootstrap.servers=<kafka-broker-ip>:9092
-
-# Unique group ID for Kafka Connect
-group.id=connect-cluster
-
-# Offset storage settings
-offset.storage.file.filename=/var/lib/kafka/connect.offsets
-
-# Key and value converter settings
-key.converter=org.apache.kafka.connect.json.JsonConverter
-value.converter=org.apache.kafka.connect.json.JsonConverter
-value.converter.schemas.enable=false
-```
-
-**Note**: Replace `<kafka-broker-ip>` with the actual IP address of your Kafka broker.
-
-#### 5.2 Create Connectors Configuration
+#### 5.1 Create Connectors Configuration
 
 Create a new file for your connector configuration:
 
@@ -269,34 +231,29 @@ Add the following configuration:
 
 ```json
 {
-  "name": "my-kafka-sink-connector",
+  "name": "kusto-sink-test",
   "config": {
     "connector.class": "com.microsoft.azure.kusto.kafka.connect.sink.KustoSinkConnector",
     "tasks.max": "1",
     "topics": "test-topic",
-    "kusto.cluster": "<cluster-id>.kusto.fabric.microsoft.com",
-    "kusto.database": "kafka-rti-database",
-    "kusto.table": "TestTable",
-    "kusto.ingestion.url": "https://ingest-<cluster-id>.kusto.fabric.microsoft.com",
-    "kusto.query.url": "https://<cluster-id>.kusto.fabric.microsoft.com",
-    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "value.converter.schemas.enable": "false",
-    "flush.size": "100",
-    "linger.ms": "500",
-    "retry.backoff.ms": "300",
-    "max.in.flight.requests.per.connection": "1",
-    "authentication.type": "ServicePrincipal",
-    "service.principal": "<app-id>",
-    "service.principal.secret": "<app-secret>",
-    "tenant.id": "<tenant-id>"
+    "kusto.ingestion.url": "https://ingest-<ID>.kusto.fabric.microsoft.com", // Replace <ID> with your Kusto cluster ID
+    "kusto.query.url": "https://<id>.kusto.fabric.microsoft.com", // Replace <ID> with your Kusto cluster ID
+    "aad.auth.authority": "<TENANT_ID>", // Replace with your Azure AD tenant ID
+    "aad.auth.appid": "<Client ID>",// Replace with your Application ID
+    "aad.auth.appkey": "<Client Secret>", //replace with your app key
+    "kusto.database": "<Kusto Database Name>", // Replace with your Kusto database name
+    "kusto.table": "<Kusto Table Name>", // Specify the Kusto table to write to
+    // The mapping configuration for the Kusto table
+    "kusto.tables.topics.mapping":"[{'topic': 'test-topic','db': 'kafka','table': 'test','format': 'csv','mapping':'test_mapping','streaming': true}]",
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter.schemas.enable": "false"
   }
 }
 ```
 
 **Note**: Replace the placeholder values with your actual configuration values.
 
-#### 5.3 Start Kafka Connect Service
+#### 5.2 Start Kafka Connect Service
 
 Start or restart the Kafka Connect service to apply the changes:
 
@@ -304,7 +261,7 @@ Start or restart the Kafka Connect service to apply the changes:
 sudo systemctl restart kafka-connect
 ```
 
-#### 5.4 Verify Connector Status
+#### 5.3 Verify Connector Status
 
 Check the status of your connector to ensure it's running correctly:
 
