@@ -83,22 +83,6 @@ This POC implements a bridge solution using Kafka Connect with a custom sink con
 
 First, deploy the Azure virtual network and VM using Bicep:
 
-s**Linux/macOS (Bash):**
-```bash
-# Clone the repository
-git clone https://github.com/your-org/kafka-rti-private-connection-poc.git
-cd kafka-rti-private-connection-poc
-
-# Login to Azure
-az login
-
-# Make deployment script executable
-chmod +x scripts/deploy-infrastructure.sh
-
-# Run the deployment script
-./scripts/deploy-infrastructure.sh
-```
-
 **Windows (PowerShell):**
 ```powershell
 # Clone the repository
@@ -124,15 +108,6 @@ The script will:
 ### 2. Create Service Principal
 
 Create an Azure service principal for Fabric authentication:
-
-**Linux/macOS (Bash):**
-```bash
-# Make script executable
-chmod +x scripts/create-service-principal.sh
-
-# Run the script
-./scripts/create-service-principal.sh
-```
 
 **Windows (PowerShell):**
 ```powershell
@@ -226,10 +201,9 @@ To test the connector, produce some sample data to the Kafka topic:
 ```bash
 # Produce test messages to the Kafka topic
 docker exec -it kafka-kafka-1 kafka-console-producer --broker-list localhost:9092 --topic test-topic --property "parse.key=true" --property "key.separator=:" <<EOF
-{"key":"value1"}
-{"key":"value2"}
-{"key":"value3"}
-EOF
+1,value1
+2,value2
+3,value3
 ```
 
 ### 8. Verify Data Flow
@@ -246,18 +220,20 @@ YourTargetTable
 ## Performance Tuning
 
 ### Connector Optimization
+
 - Adjust `batch.size` based on throughput requirements
 - Configure appropriate `tasks.max` for parallelism
 - Tune `flush.timeout.ms` for latency vs. throughput balance
 
 ### Kafka Connect Cluster
+
 - Allocate sufficient memory and CPU resources
 - Monitor JVM heap usage and garbage collection
 - Scale horizontally by adding more worker nodes
 
 ## Contributing
 
-Contributions are welcome! 
+Contributions are welcome!
 
 ## Support
 

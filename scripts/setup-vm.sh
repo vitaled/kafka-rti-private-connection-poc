@@ -37,7 +37,7 @@ mkdir -p ~/kafka-rti-poc/{docker,config,scripts,connectors}
 # Clone the repository
 echo "📥 Cloning project repository..."
 cd ~
-git clone https://github.com/your-org/kafka-rti-private-connection-poc.git
+git clone https://github.com/vitaled/kafka-rti-private-connection-poc.git
 cd kafka-rti-private-connection-poc
 
 # Set permissions

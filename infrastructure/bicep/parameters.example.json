@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "resourceGroupName": {
-      "value": "rg-kafka-rti-poc"
+      "value": "rg-kafka-rti-poc-1"
     },
     "location": {
       "value": "East US"
@@ -16,9 +16,6 @@
     },
     "environment": {
       "value": "POC"
-    }
-  }
-}
     }
   }
 }

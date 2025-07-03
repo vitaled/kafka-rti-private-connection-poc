@@ -1,6 +1,6 @@
 param(
     [string]$SubscriptionId = "",
-    [string]$ResourceGroupName = "rg-kafka-rti-poc",
+    [string]$ResourceGroupName = "rg-kafka-rti-poc-42",
     [string]$Location = "North Europe"
 )
 

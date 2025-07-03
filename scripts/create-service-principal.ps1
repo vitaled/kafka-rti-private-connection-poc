@@ -28,19 +28,28 @@ catch {
 }
 
 try {
-    # Create service principal
+    # Create service principal with shorter credential lifetime
     Write-Host "Creating service principal..." -ForegroundColor Yellow
     
-    $sp = New-AzADServicePrincipal -DisplayName $ServicePrincipalName `
-        -Role "Contributor" `
-        -Scope "/subscriptions/$currentSubscriptionId"
+    # First create the application
+    $app = New-AzADApplication -DisplayName $ServicePrincipalName
+    
+    # Create a credential with shorter lifetime (1 year instead of default)
+    $startDate = Get-Date
+    $endDate = $startDate.AddDays(7)
+    
+    $credential = New-AzADAppCredential -ApplicationId $app.AppId -StartDate $startDate -EndDate $endDate
+    
+    # Create the service principal
+    $sp = New-AzADServicePrincipal -ApplicationId $app.AppId
+    
+    # Assign the Contributor role
+    New-AzRoleAssignment -ObjectId $sp.Id -RoleDefinitionName "Contributor" -Scope "/subscriptions/$currentSubscriptionId"
     
     # Get the service principal details
-    $clientId = $sp.AppId
+    $clientId = $app.AppId
     $tenantId = (Get-AzContext).Tenant.Id
-    
-    # Get the client secret (password)
-    $clientSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp.PasswordCredentials.SecretText))
+    $clientSecret = $credential.SecretText
     
     Write-Host "✅ Service principal created successfully!" -ForegroundColor Green
     Write-Host ""
@@ -49,6 +58,7 @@ try {
     Write-Host "Client ID: $clientId" -ForegroundColor White
     Write-Host "Client Secret: $clientSecret" -ForegroundColor White
     Write-Host "Tenant ID: $tenantId" -ForegroundColor White
+    Write-Host "Credential Expires: $($endDate.ToString('yyyy-MM-dd'))" -ForegroundColor White
     Write-Host ""
     Write-Host "⚠️  IMPORTANT: Save these credentials securely!" -ForegroundColor Yellow
     Write-Host "The client secret cannot be retrieved again." -ForegroundColor Yellow
@@ -63,12 +73,37 @@ try {
         clientId = $clientId
         clientSecret = $clientSecret
         tenantId = $tenantId
+        expiryDate = $endDate.ToString('yyyy-MM-dd')
     }
     
     $credentials | ConvertTo-Json -Depth 3 | Out-File -FilePath "service-principal-credentials.json" -Encoding UTF8
     Write-Host "💾 Credentials saved to: service-principal-credentials.json" -ForegroundColor Green
 }
 catch {
-    Write-Host "❌ Failed to create service principal: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
+    if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Message -like "*DisplayName*") {
+        Write-Host "⚠️  Service principal with name '$ServicePrincipalName' may already exist." -ForegroundColor Yellow
+        Write-Host "Trying to retrieve existing service principal..." -ForegroundColor Yellow
+        
+        try {
+            # Try to get existing service principal
+            $existingSp = Get-AzADServicePrincipal -DisplayName $ServicePrincipalName
+            if ($existingSp) {
+                Write-Host "✅ Found existing service principal." -ForegroundColor Green
+                Write-Host "Client ID: $($existingSp.AppId)" -ForegroundColor White
+                Write-Host "Tenant ID: $((Get-AzContext).Tenant.Id)" -ForegroundColor White
+                Write-Host ""
+                Write-Host "⚠️  Cannot retrieve the client secret for existing service principal." -ForegroundColor Yellow
+                Write-Host "If you need a new secret, please:" -ForegroundColor Yellow
+                Write-Host "1. Delete the existing service principal: Remove-AzADServicePrincipal -ObjectId $($existingSp.Id)" -ForegroundColor White
+                Write-Host "2. Re-run this script" -ForegroundColor White
+            }
+        }
+        catch {
+            Write-Host "❌ Failed to retrieve existing service principal: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+    else {
+        Write-Host "❌ Failed to create service principal: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
 }
